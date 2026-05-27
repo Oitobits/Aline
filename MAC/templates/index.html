@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NutriFill AI - Preenchimento Inteligente de Anamnese</title>
+    <!-- Modern Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome for Premium Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Custom stylesheet -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="glass-bg-decor decor-1"></div>
+    <div class="glass-bg-decor decor-2"></div>
+
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="logo">
+                <i class="fa-solid fa-laptop-medical"></i>
+                <h1>Nutri<span>Fill</span> AI</h1>
+            </div>
+            <p class="subtitle">Automação Inteligente de Exames Clínicos para Fichas de Anamnese</p>
+        </header>
+
+        <!-- Main Workspace -->
+        <main class="app-main">
+            <!-- Configuration Section -->
+            <section class="config-card glass-panel">
+                <div class="card-header">
+                    <i class="fa-solid fa-key"></i>
+                    <h2>Configuração da API do Gemini</h2>
+                </div>
+                <div class="input-group">
+                    <div class="password-wrapper">
+                        <input type="password" id="apiKeyInput" placeholder="Insira sua GEMINI_API_KEY..." autocomplete="off">
+                        <button type="button" id="togglePasswordBtn" class="icon-btn">
+                            <i class="fa-solid fa-eye"></i>
+                        </button>
+                    </div>
+                    <span class="help-text">Sua chave é salva apenas no seu navegador (localStorage) e enviada de forma segura para o servidor local.</span>
+                </div>
+            </section>
+
+            <!-- Upload and Process Section -->
+            <section class="upload-section">
+                <div class="upload-grid">
+                    <!-- Drop Zone 1: PDF -->
+                    <div class="drop-zone-wrapper">
+                        <div class="drop-zone glass-panel" id="pdfDropZone">
+                            <input type="file" id="pdfFileInput" accept="application/pdf" hidden>
+                            <div class="drop-zone-content">
+                                <div class="icon-circle pdf-icon">
+                                    <i class="fa-regular fa-file-pdf"></i>
+                                </div>
+                                <h3>Laudo do Exame (PDF)</h3>
+                                <p class="drag-instructions">Arraste o arquivo PDF ou <span class="browse-link">navegue</span></p>
+                                <p class="file-limits">Suporta PDFs de qualquer laboratório</p>
+                            </div>
+                            <div class="file-info-bar hidden" id="pdfFileInfo">
+                                <i class="fa-regular fa-file-pdf"></i>
+                                <span class="file-name">nome_do_arquivo.pdf</span>
+                                <button type="button" class="remove-file-btn" id="removePdfBtn"><i class="fa-solid fa-xmark"></i></button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Drop Zone 2: XLSX -->
+                    <div class="drop-zone-wrapper">
+                        <div class="drop-zone glass-panel" id="xlsxDropZone">
+                            <input type="file" id="xlsxFileInput" accept=".xlsx" hidden>
+                            <div class="drop-zone-content">
+                                <div class="icon-circle excel-icon">
+                                    <i class="fa-regular fa-file-excel"></i>
+                                </div>
+                                <h3>Ficha de Anamnese (Excel)</h3>
+                                <p class="drag-instructions">Arraste o arquivo .xlsx ou <span class="browse-link">navegue</span></p>
+                                <p class="file-limits">Pode ser o modelo limpo ou ficha existente</p>
+                            </div>
+                            <div class="file-info-bar hidden" id="xlsxFileInfo">
+                                <i class="fa-regular fa-file-excel"></i>
+                                <span class="file-name">nome_da_planilha.xlsx</span>
+                                <button type="button" class="remove-file-btn" id="removeXlsxBtn"><i class="fa-solid fa-xmark"></i></button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Action Button -->
+                <div class="action-container">
+                    <button type="button" id="processBtn" class="btn primary-btn btn-large" disabled>
+                        <i class="fa-solid fa-gears"></i>
+                        <span>Processar e Atualizar Planilha</span>
+                    </button>
+                </div>
+            </section>
+
+            <!-- Loading Screen -->
+            <section class="loading-panel glass-panel hidden" id="loadingPanel">
+                <div class="spinner-wrapper">
+                    <div class="loader-spinner"></div>
+                </div>
+                <h3>Analisando laudo com Inteligência Artificial...</h3>
+                <p>O Gemini está lendo os dados estruturados do exame de sangue e preenchendo a ficha de anamnese. Isso pode levar alguns segundos.</p>
+            </section>
+
+            <!-- Error Panel -->
+            <section class="error-panel glass-panel hidden" id="errorPanel">
+                <div class="error-icon">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                </div>
+                <h3>Ocorreu um Erro</h3>
+                <p id="errorMsgText">Descrição detalhada do erro aqui.</p>
+                <button type="button" class="btn secondary-btn" id="closeErrorBtn">Entendi</button>
+            </section>
+
+            <!-- Results Section -->
+            <section class="results-panel glass-panel hidden" id="resultsPanel">
+                <div class="results-header">
+                    <div class="success-icon">
+                        <i class="fa-solid fa-circle-check"></i>
+                    </div>
+                    <div>
+                        <h2>Processamento Concluído!</h2>
+                        <p class="results-subtitle">Todos os exames foram extraídos e a planilha foi atualizada com sucesso.</p>
+                    </div>
+                </div>
+
+                <!-- Patient Summary Card -->
+                <div class="patient-summary-grid">
+                    <div class="summary-item">
+                        <span class="label">Paciente</span>
+                        <span class="value" id="summaryPatientName">-</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="label">Data de Coleta</span>
+                        <span class="value" id="summaryCollectionDate">-</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="label">Idade</span>
+                        <span class="value" id="summaryAge">-</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="label">Nascimento</span>
+                        <span class="value" id="summaryBirthDate">-</span>
+                    </div>
+                </div>
+
+                <!-- Download Card -->
+                <div class="download-action-card">
+                    <div class="download-info">
+                        <i class="fa-solid fa-file-arrow-down download-icon-accent"></i>
+                        <div>
+                            <h4>Sua Planilha Pronta</h4>
+                            <p>O arquivo inclui os dados pessoais, novo histórico e análises de tendência.</p>
+                        </div>
+                    </div>
+                    <a href="#" id="downloadLink" class="btn success-btn">
+                        <i class="fa-solid fa-download"></i>
+                        <span>Baixar Ficha Excel</span>
+                    </a>
+                </div>
+
+                <!-- Preview Table Header -->
+                <div class="preview-header">
+                    <h3>Visualização dos Exames Extraídos</h3>
+                    <span class="badge" id="resultsCountBadge">0 exames</span>
+                </div>
+
+                <!-- Preview Table -->
+                <div class="table-container">
+                    <table class="preview-table">
+                        <thead>
+                            <tr>
+                                <th>Parâmetro Extraído</th>
+                                <th>Valor do Resultado</th>
+                            </tr>
+                        </thead>
+                        <tbody id="resultsTableBody">
+                            <!-- JS injected rows -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div class="action-container" style="margin-top: 2rem;">
+                    <button type="button" class="btn secondary-btn" id="newProcessBtn">
+                        <i class="fa-solid fa-rotate-left"></i>
+                        <span>Processar Outro Exame</span>
+                    </button>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="app-footer">
+            <p>&copy; 2026 NutriFill AI. Desenvolvido para simplificar o preenchimento de anamnese.</p>
+        </footer>
+    </div>
+
+    <!-- Script Injection -->
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

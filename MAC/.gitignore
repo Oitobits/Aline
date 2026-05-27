@@ -1,0 +1,19 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+
+# Patient/User uploaded data (data privacy)
+temp_uploads/
+*.pdf
+*.xlsx
+!Anamnese.xlsx
+
+# Local zip files
+*.zip
+
+# OS files
+.DS_Store
+Thumbs.db
