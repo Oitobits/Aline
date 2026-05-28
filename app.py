@@ -2,6 +2,7 @@ import os
 import re
 import sys
 import uuid
+import time
 import pypdf
 import openpyxl
 from openpyxl.utils import get_column_letter
@@ -66,13 +67,32 @@ def clean_value(param_name, val_str):
     except ValueError:
         return val_str
 
+# Helper to cleanup old files from upload directory (older than 15 minutes)
+def cleanup_old_files():
+    try:
+        now = time.time()
+        for filename in os.listdir(UPLOAD_FOLDER):
+            file_path = os.path.join(UPLOAD_FOLDER, filename)
+            # 15 minutes = 900 seconds
+            if os.path.isfile(file_path) and (now - os.path.getmtime(file_path)) > 900:
+                try:
+                    os.remove(file_path)
+                except Exception as e:
+                    print(f"Error deleting temp file {file_path}: {e}")
+    except Exception as e:
+        print(f"Error listing UPLOAD_FOLDER for cleanup: {e}")
+
 @app.route('/')
 def index():
-    return render_template('index.html')
+    has_server_key = bool(os.environ.get('GEMINI_API_KEY'))
+    return render_template('index.html', has_server_key=has_server_key)
 
 @app.route('/process', methods=['POST'])
 def process():
-    api_key = request.form.get('api_key')
+    # Trigger auto-cleanup of old files
+    cleanup_old_files()
+    
+    api_key = request.form.get('api_key') or os.environ.get('GEMINI_API_KEY')
     if not api_key:
         return jsonify({'error': 'A Chave de API do Gemini é obrigatória.'}), 400
         

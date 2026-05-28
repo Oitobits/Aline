@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: nutrifill-ai
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.5
+      - key: GEMINI_API_KEY
+        sync: false
+        placeholder: "Opcional: Insira sua chave de API do Gemini para pré-configurá-la"

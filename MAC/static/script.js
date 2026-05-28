@@ -149,7 +149,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 6. Validate inputs to enable process button
     function validateInputs() {
-        const hasApiKey = apiKeyInput.value.trim().length > 0;
+        const hasApiKey = apiKeyInput.value.trim().length > 0 || (window.HAS_SERVER_KEY === true);
         const hasPdf = pdfFile !== null;
         const hasXlsx = xlsxFile !== null;
 
@@ -161,10 +161,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // 7. Process files form submission
     processBtn.addEventListener('click', async () => {
         const api_key = apiKeyInput.value.trim();
-        if (!api_key || !pdfFile || !xlsxFile) return;
+        if ((!api_key && !window.HAS_SERVER_KEY) || !pdfFile || !xlsxFile) return;
 
-        // Save key locally
-        localStorage.setItem('gemini_api_key', api_key);
+        // Save key locally if provided
+        if (api_key) {
+            localStorage.setItem('gemini_api_key', api_key);
+        }
 
         // UI transitions
         configCard.classList.add('hidden');

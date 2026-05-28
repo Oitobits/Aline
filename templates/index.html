@@ -37,12 +37,18 @@
                 </div>
                 <div class="input-group">
                     <div class="password-wrapper">
-                        <input type="password" id="apiKeyInput" placeholder="Insira sua GEMINI_API_KEY..." autocomplete="off">
+                        <input type="password" id="apiKeyInput" placeholder="{% if has_server_key %}Chave de API configurada no servidor (Opcional)...{% else %}Insira sua GEMINI_API_KEY...{% endif %}" autocomplete="off">
                         <button type="button" id="togglePasswordBtn" class="icon-btn">
                             <i class="fa-solid fa-eye"></i>
                         </button>
                     </div>
-                    <span class="help-text">Sua chave é salva apenas no seu navegador (localStorage) e enviada de forma segura para o servidor local.</span>
+                    <span class="help-text">
+                        {% if has_server_key %}
+                        <i class="fa-solid fa-circle-check" style="color: #4cd137;"></i> Uma chave de API padrão está configurada no servidor. Você pode deixar este campo em branco.
+                        {% else %}
+                        Sua chave é salva apenas no seu navegador (localStorage) e enviada de forma segura para o servidor local.
+                        {% endif %}
+                    </span>
                 </div>
             </section>
 
@@ -202,6 +208,9 @@
     </div>
 
     <!-- Script Injection -->
+    <script>
+        window.HAS_SERVER_KEY = {{ 'true' if has_server_key else 'false' }};
+    </script>
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>
