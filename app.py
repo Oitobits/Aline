@@ -5,6 +5,7 @@ import uuid
 import time
 import pypdf
 import openpyxl
+import unicodedata
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import PatternFill, Font
 from flask import Flask, request, jsonify, render_template, send_from_directory
@@ -28,7 +29,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # Pydantic Schemas for Gemini Structured Output
 class ExamResult(BaseModel):
-    parameter: str = Field(description="Nome padronizado do exame em português, ex: Eritrócitos, Hemoglobina, Hematócrito, VCM, HCM, CHCM, RDW, Leucócitos, Neutrófilos, Linfócitos, Eosinófilos, Monócitos, Basófilos, Plaquetas, VPM, Glicose, HbA1c, Colesterol Total, HDL, Triglicérides, LDL, TGO, TGP, GGT, Creatinina, Ureia, TSH, T4 Livre, Ferritina, Vitamina B-12, Ácido Fólico, Zinco, Vitamina D, Sódio, Potássio, Cálcio")
+    parameter: str = Field(description="Nome do parâmetro correspondente da planilha Excel, exatamente como fornecido na lista de parâmetros permitidos.")
     value: str = Field(description="O valor numérico bruto extraído como string (ex: '4,89', '14,8', '6.650', '230.000', 'Superior a 24,0', '102,8')")
 
 class LabReport(BaseModel):
@@ -66,6 +67,13 @@ def clean_value(param_name, val_str):
             return float(clean_str)
     except ValueError:
         return val_str
+
+# Helper to normalize strings for comparison (lowercase, accents, spaces removed)
+def normalize_str(s):
+    if not s:
+        return ""
+    s = " ".join(s.strip().lower().split())
+    return "".join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
 
 # Helper to cleanup old files from upload directory (older than 15 minutes)
 def cleanup_old_files():
@@ -126,35 +134,61 @@ def process():
         if not pdf_text.strip():
             raise Exception("Não foi possível extrair texto do PDF. O laudo pode ser uma imagem escaneada.")
 
-        # 2. Call Gemini Client with Structured Output
+        # 2. Load Excel file and dynamically extract parameters for Gemini
+        wb = openpyxl.load_workbook(xlsx_path, data_only=False)
+        excel_parameters = []
+        if 'Exames ' in wb.sheetnames:
+            ws_ex = wb['Exames ']
+            for r in range(3, ws_ex.max_row + 1):
+                val = ws_ex.cell(row=r, column=1).value
+                if val:
+                    val_str = str(val).strip()
+                    # Skip header labels/calculated formulas
+                    if not any(indicator in val_str.lower() for indicator in ["divisão", "melhor preditor", "exames", "parâmetros", "exame de saliva", "cortisol salivar"]):
+                        excel_parameters.append(val_str)
+
+        # 3. Call Gemini Client with Structured Output
         client = genai.Client(api_key=api_key)
         
-        # Use gemini-2.5-flash for fast and precise data extraction
+        # Format parameter list for the Gemini system instruction
+        parameters_list_str = "\n".join([f"- {p}" for p in excel_parameters])
+        
+        system_instruction = (
+            "Você é um especialista médico em transcrição de exames laboratoriais brasileiros.\n"
+            "Sua tarefa é extrair com precisão do texto do laudo todos os resultados dos exames, o nome completo do paciente, "
+            "sua idade, data de nascimento e a data de coleta dos exames.\n\n"
+            "IMPORTANTE: Você deve mapear cada exame extraído para o parâmetro correspondente exato na seguinte lista de parâmetros da planilha:\n"
+            f"{parameters_list_str}\n\n"
+            "Regras de Mapeamento:\n"
+            "1. Identifique sinônimos e abreviações comuns para fazer o mapeamento correto. Exemplos:\n"
+            "   - 'Hemoglobina Glicada' ou 'A1c' deve ser mapeado para 'Hb1Ac'.\n"
+            "   - 'Gama GT', 'GGT' ou 'Gama-Glutamil Transferase' deve ser mapeado para 'GGT (gama GT)'.\n"
+            "   - 'Triglicerídeos' ou 'Triglicérides' deve ser mapeado para 'Triglicérides '.\n"
+            "   - 'Cortisol' ou 'Cortisol Sérico' deve ser mapeado para 'Cortisol'.\n"
+            "   - 'HOMA-IR' ou 'HOMA IR' deve ser mapeado para 'HOMA IR (RESISTÊNCIA A INSULINA)'.\n"
+            "   - 'Saturação de Transferrina' deve ser mapeado para 'Saturação de transferrina  sérica  (jejum)'.\n"
+            "   - 'Fosfatase Alcalina' deve ser mapeado para 'FA (fosfatase alcalina)'.\n"
+            "   - 'Vitamina A' ou 'Retinol' deve ser mapeado para 'Retinol Vit A '.\n"
+            "   - 'Calcio Ionico' ou 'Cálcio Ionizado' deve ser mapeado para 'Calcio Iônico .'.\n"
+            "   - 'Cálcio Sérico' ou 'Cálcio Total' deve ser mapeado para 'Cálcio'.\n"
+            "2. Retorne o nome do parâmetro EXATAMENTE como escrito na lista fornecida.\n"
+            "3. Se um exame do laudo não tiver correspondente claro na lista de parâmetros da planilha, ignore-o."
+        )
+
         response = client.models.generate_content(
             model='gemini-2.5-flash',
             contents=pdf_text,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
                 response_schema=LabReport,
-                system_instruction=(
-                    "Você é um especialista médico em transcrição de exames laboratoriais brasileiros. "
-                    "Extraia com precisão todos os resultados dos exames, o nome completo do paciente, "
-                    "sua idade, data de nascimento e a data de coleta dos exames. "
-                    "Importante: Mapeie os nomes dos exames para os termos padrão da medicina (ex: Eritrócitos, "
-                    "Hemoglobina, Hematócrito, VCM, HCM, CHCM, RDW, Leucócitos, Neutrófilos, Linfócitos, Eosinófilos, "
-                    "Monócitos, Basófilos, Plaquetas, VPM, Glicose, HbA1c, Colesterol Total, HDL, Triglicérides, LDL, "
-                    "TGO, TGP, GGT, Creatinina, Ureia, TSH, T4 Livre, Ferritina, Vitamina B-12, Ácido Fólico, Zinco, "
-                    "Vitamina D, Sódio, Potássio, Cálcio)."
-                )
+                system_instruction=system_instruction
             ),
         )
         
         # Validate data
         extracted_data = LabReport.model_validate_json(response.text)
         
-        # 3. Update Excel file
-        wb = openpyxl.load_workbook(xlsx_path, data_only=False)
-        
+        # 4. Update Excel file
         # Update General Info
         if 'Informações gerais' in wb.sheetnames:
             ws_info = wb['Informações gerais']
@@ -174,46 +208,6 @@ def process():
         if 'Exames ' in wb.sheetnames:
             ws_ex = wb['Exames ']
             
-            # Map extracted parameters to exact spreadsheet rows
-            param_mapping = {
-                "Eritrócitos": "Hemácias ",
-                "Hemoglobina": "Hemoglobina",
-                "Hematócrito": "Hematócrito",
-                "VCM": "VCM ",
-                "HCM": "HCM ",
-                "CHCM": "CHCM",
-                "RDW": "RDW",
-                "Leucócitos": "Leucócitos",
-                "Neutrófilos": "Neutrófilo ",
-                "Linfócitos": "Linfócitos ",
-                "Eosinófilos": "Eosinófilos",
-                "Monócitos": "Monócitos ",
-                "Basófilos": "Basófilos",
-                "Plaquetas": "Plaquetas",
-                "VPM": "VPM ",
-                "Glicose": "Glicemia jejum ",
-                "HbA1c": "Hb1Ac",
-                "Colesterol Total": "Colesterol Total ",
-                "HDL": "HDL colesterol ",
-                "Triglicérides": "Triglicérides ",
-                "LDL": "LDL colesterol ",
-                "TGO": "TGO/AST ",
-                "TGP": "TGP/ALT ",
-                "GGT": "GGT (gama GT)",
-                "Creatinina": "Creatinina ",
-                "Ureia": "Ureia sérica ",
-                "TSH": "TSH ULTRA SENSÍVEL ",
-                "T4 Livre": "T4 livre ",
-                "Ferritina": "Ferritina ",
-                "Vitamina B-12": "Vitamina B12 ",
-                "Ácido Fólico": "Vitamina B9",
-                "Zinco": "Zinco sérico ",
-                "Vitamina D": "25 (OH) D ",
-                "Sódio": "Sódio ",
-                "Potássio": "Potassio ",
-                "Cálcio": "Calcio Iônico ."
-            }
-            
             # Find target column
             target_col = 3 # Column C is 3
             while True:
@@ -225,49 +219,78 @@ def process():
             # Write Date
             ws_ex.cell(row=2, column=target_col, value=extracted_data.collection_date)
             
-            # Build parameter row mapping
+            # Build parameter row mapping (exact lower and normalized)
             row_map = {}
             for r in range(1, ws_ex.max_row + 1):
                 val = ws_ex.cell(row=r, column=1).value
                 if val:
-                    row_map[str(val).strip().lower()] = r
+                    val_str = str(val)
+                    row_map[val_str.strip().lower()] = r
+                    row_map[normalize_str(val_str)] = r
                     
             # Fills for styling
             green_fill = PatternFill(start_color="E2F0D9", end_color="E2F0D9", fill_type="solid") # soft green
             
             # Categorize parameters for trend analysis
-            lower_better = ["glicose", "glicemia jejum", "colesterol total", "triglicérides", "ldl", "ldl colesterol", "tgo/ast", "tgp/alt", "ggt (gama gt)", "creatinina", "ureia sérica", "hb1ac"]
-            higher_better = ["hemácias", "hemoglobina", "hematócrito", "hdl colesterol", "ferro sérico", "ferritina", "vitamina b12", "vitamina b9", "zinco sérico", "25 (oh) d"]
+            lower_better = [
+                "glicose", "glicemia jejum", "colesterol total", "triglicérides", "triglicerideos", 
+                "ldl", "ldl colesterol", "tgo/ast", "tgp/alt", "ggt (gama gt)", "creatinina", 
+                "ureia sérica", "hb1ac", "hemoglobina glicada", "insulina", "homa ir", "homa beta", 
+                "pcr us", "homocisteína", "fibrinogênio", "t3 reverso", "anti-tg", "anti-tpo", 
+                "trab", "tsi", "tireoglobulina", "ácido úrico", "fosfatase alcalina", "pth", 
+                "anti-endomisio", "anti-transglutaminase", "ige total", "prolactina", 
+                "lipoproteína a", "cea", "ca 125", "ca 19,9"
+            ]
+            higher_better = [
+                "hemácias", "hemoglobina", "hematócrito", "hdl colesterol", "ferro sérico", 
+                "ferritina", "vitamina b12", "vitamina b9", "zinco sérico", "25 (oh) d", 
+                "vitamina d", "magnésio sérico", "selênio", "vitamina b6", "vitamina b1", 
+                "vitamina c", "cromo serico", "testosterona livre", "testosterona total", 
+                "progesterona", "estradiol", "estrona", "sdhea", "shbg", "fsh", "lh", "igf1"
+            ]
             
             prev_col = target_col - 1
             
             # Write values and calculate trend comparison
             for result in extracted_data.results:
-                sheet_param_name = param_mapping.get(result.parameter)
-                if sheet_param_name:
-                    key = sheet_param_name.strip().lower()
-                    if key in row_map:
-                        row_idx = row_map[key]
-                        cleaned_val = clean_value(result.parameter, result.value)
-                        
-                        # Write value
-                        ws_ex.cell(row=row_idx, column=target_col, value=cleaned_val)
-                        
-                        # Trend comparison (if previous column has value and both are numeric)
-                        if prev_col >= 3:
-                            prev_val = ws_ex.cell(row=row_idx, column=prev_col).value
-                            if isinstance(cleaned_val, (int, float)) and isinstance(prev_val, (int, float)):
-                                has_improved = False
-                                # Check logic
-                                if any(lbl in key for lbl in lower_better):
-                                    if cleaned_val < prev_val:
-                                        has_improved = True
-                                elif any(hbl in key for hbl in higher_better):
-                                    if cleaned_val > prev_val:
-                                        has_improved = True
-                                        
-                                if has_improved:
-                                    ws_ex.cell(row=row_idx, column=target_col).fill = green_fill
+                extracted_param = result.parameter
+                if not extracted_param:
+                    continue
+                    
+                key = extracted_param.strip().lower()
+                norm_key = normalize_str(extracted_param)
+                
+                row_idx = None
+                if key in row_map:
+                    row_idx = row_map[key]
+                elif norm_key in row_map:
+                    row_idx = row_map[norm_key]
+                    
+                if row_idx:
+                    cleaned_val = clean_value(extracted_param, result.value)
+                    
+                    # Write value
+                    ws_ex.cell(row=row_idx, column=target_col, value=cleaned_val)
+                    
+                    # Trend comparison (if previous column has value and both are numeric)
+                    if prev_col >= 3:
+                        prev_val = ws_ex.cell(row=row_idx, column=prev_col).value
+                        if isinstance(cleaned_val, (int, float)) and isinstance(prev_val, (int, float)):
+                            has_improved = False
+                            
+                            # Use row name for lookup to avoid mismatch with extracted name
+                            row_name = str(ws_ex.cell(row=row_idx, column=1).value).lower()
+                            
+                            # Check logic
+                            if any(lbl in row_name for lbl in lower_better):
+                                if cleaned_val < prev_val:
+                                    has_improved = True
+                            elif any(hbl in row_name for hbl in higher_better):
+                                if cleaned_val > prev_val:
+                                    has_improved = True
+                                    
+                            if has_improved:
+                                ws_ex.cell(row=row_idx, column=target_col).fill = green_fill
             
         # Save output to a unique filename
         safe_patient_name = "".join([c for c in extracted_data.patient_name if c.isalnum() or c==' ']).strip().replace(" ", "_")
