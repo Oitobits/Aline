@@ -172,7 +172,8 @@ def process():
             "   - 'Calcio Ionico' ou 'Cálcio Ionizado' deve ser mapeado para 'Calcio Iônico .'.\n"
             "   - 'Cálcio Sérico' ou 'Cálcio Total' deve ser mapeado para 'Cálcio'.\n"
             "2. Retorne o nome do parâmetro EXATAMENTE como escrito na lista fornecida.\n"
-            "3. Se um exame do laudo não tiver correspondente claro na lista de parâmetros da planilha, ignore-o."
+            "3. Se um exame do laudo não tiver correspondente claro na lista de parâmetros da planilha, ignore-o.\n"
+            "4. Para exames do leucograma (como Neutrófilos/Segmentados, Linfócitos, Eosinófilos, Monócitos, Basófilos), o laudo do laboratório costuma apresentar duas colunas de resultados: contagem relativa em porcentagem (%) e contagem absoluta (mm3 ou /uL). Você deve SEMPRE extrair o valor em PORCENTAGEM (%) para esses exames (ex: se o laudo tiver '61,5' na porcentagem e '4.213' na contagem absoluta para Segmentados, você deve retornar '61,5')."
         )
 
         response = client.models.generate_content(
